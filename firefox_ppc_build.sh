@@ -55,7 +55,7 @@ check_prereqs() {
     # Check for our Rust compiler
     if [ ! -f "$RUSTC_PPC" ]; then
         log "Building rustc_ppc..."
-        gcc -O3 -mcpu=${TARGET_CPU} -maltivec -o rustc_ppc rustc_100_percent.c
+        gcc -std=c99 -O3 -mcpu=${TARGET_CPU} -maltivec -o rustc_ppc rustc_100_percent.c
     fi
 
     # Check SDK
