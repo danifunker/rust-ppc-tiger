@@ -239,7 +239,7 @@ void compile_crate(BuildContext* ctx, Crate* crate) {
         /* Compile Rust to assembly */
         char cmd[1024];
         snprintf(cmd, sizeof(cmd),
-                "./rustc_ppc %s -o %s "
+                "rustc_ppc %s -o %s "
                 "-C target-cpu=%s "
                 "-C opt-level=%s "
                 "%s %s",
@@ -424,7 +424,7 @@ void generate_makefile(const char* project_name, const char* cc) {
     printf("# Makefile for %s (Tiger/Leopard PowerPC)\n\n", project_name);
 
     printf("# Toolchain\n");
-    printf("RUSTC = ./rustc_ppc\n");
+    printf("RUSTC = rustc_ppc\n");
     printf("AS = as\n");
     printf("CC = %s\n", cc && cc[0] ? cc : "gcc");
     printf("AR = ar\n\n");
