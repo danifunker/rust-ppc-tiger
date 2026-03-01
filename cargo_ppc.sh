@@ -13,13 +13,13 @@ BUILD_SYSTEM="$SCRIPT_DIR/rustc_build_system"
 # Ensure our tools are built
 if [ ! -x "$RUSTC_PPC" ]; then
     echo "Building rustc_ppc..."
-    gcc -O3 -o "$RUSTC_PPC" "$SCRIPT_DIR/rustc_100_percent.c" 2>/dev/null || \
-    gcc -O2 -o "$RUSTC_PPC" "$SCRIPT_DIR/rustc_100_percent.c"
+    /opt/local/bin/gcc-apple-4.2 -O3 -o "$RUSTC_PPC" "$SCRIPT_DIR/rustc_100_percent.c" 2>/dev/null || \
+    /opt/local/bin/gcc-apple-4.2 -O2 -o "$RUSTC_PPC" "$SCRIPT_DIR/rustc_100_percent.c"
 fi
 
 if [ ! -x "$BUILD_SYSTEM" ]; then
     echo "Building build system..."
-    gcc -O2 -o "$BUILD_SYSTEM" "$SCRIPT_DIR/rustc_build_system.c"
+    /opt/local/bin/gcc-apple-4.2 -std=c99 -O2 -o "$BUILD_SYSTEM" "$SCRIPT_DIR/rustc_build_system.c"
 fi
 
 # Parse cargo-like commands
