@@ -1180,27 +1180,60 @@ void compile_rust(char* source) {
 
 int main(int argc, char** argv) {
     if (argc < 2) {
-        printf("Usage: %s <file.rs>\n", argv[0]);
+        fprintf(stderr, "Usage: %s <file.rs> [-o output.s] [-C ...]\n", argv[0]);
         return 1;
     }
-    
-    FILE* f = fopen(argv[1], "r");
+
+    char* input_file = NULL;
+    char* output_file = NULL;
+
+    /* Parse arguments: skip -C key=value, -g, and capture -o */
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "-o") == 0 && i + 1 < argc) {
+            output_file = argv[++i];
+        } else if (strcmp(argv[i], "-C") == 0 && i + 1 < argc) {
+            i++; /* skip value */
+        } else if (strcmp(argv[i], "-g") == 0 ||
+                   strcmp(argv[i], "--check") == 0 ||
+                   strcmp(argv[i], "--version") == 0) {
+            /* skip flags */
+        } else if (argv[i][0] != '-' && !input_file) {
+            input_file = argv[i];
+        }
+    }
+
+    if (!input_file) {
+        fprintf(stderr, "Error: no input file specified\n");
+        return 1;
+    }
+
+    FILE* f = fopen(input_file, "r");
     if (!f) {
-        perror("Cannot open file");
+        fprintf(stderr, "Cannot open %s: ", input_file);
+        perror(NULL);
         return 1;
     }
-    
+
     fseek(f, 0, SEEK_END);
     long size = ftell(f);
     fseek(f, 0, SEEK_SET);
-    
+
     char* source = malloc(size + 1);
     fread(source, 1, size, f);
     source[size] = 0;
     fclose(f);
-    
+
+    /* Redirect stdout to output file if -o was given */
+    if (output_file) {
+        if (!freopen(output_file, "w", stdout)) {
+            fprintf(stderr, "Error: cannot open output file %s\n", output_file);
+            free(source);
+            return 1;
+        }
+    }
+
     compile_rust(source);
     free(source);
-    
+
     return 0;
 }
