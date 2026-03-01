@@ -24,6 +24,7 @@ typedef struct {
     int altivec;
     char sysroot[256];
     char linker[256];
+    char cc[256];           /* C compiler, e.g. gcc-4.2, gcc-apple-4.2 */
 } BuildConfig;
 
 typedef struct {
@@ -202,52 +203,101 @@ void resolve_build_order(BuildContext* ctx, int* order) {
 void compile_crate(BuildContext* ctx, Crate* crate) {
     printf("; Compiling crate: %s v%s\n", crate->name, crate->version);
 
+    /* Ensure output directory exists */
+    char mkdir_cmd[512];
+    snprintf(mkdir_cmd, sizeof(mkdir_cmd), "mkdir -p %s", ctx->output_dir);
+    system(mkdir_cmd);
+
     for (int i = 0; i < crate->source_count; i++) {
         char* src = crate->source_files[i];
-        char obj[512];
-        snprintf(obj, sizeof(obj), "%s/%s.o", ctx->output_dir, crate->name);
 
-        printf(";   %s -> %s\n", src, obj);
+        /* Generate a unique object name from the source path:
+         * ./src/fs/ext.rs -> src_fs_ext */
+        char base[256];
+        strncpy(base, src, sizeof(base) - 1);
+        base[sizeof(base) - 1] = '\0';
+        /* Strip leading ./ */
+        char* p = base;
+        if (p[0] == '.' && p[1] == '/') p += 2;
+        /* Replace / and . with _ , drop trailing _rs */
+        for (char* c = p; *c; c++) {
+            if (*c == '/' || *c == '.') *c = '_';
+        }
+        /* Remove trailing _rs */
+        size_t blen = strlen(p);
+        if (blen > 3 && strcmp(p + blen - 3, "_rs") == 0)
+            p[blen - 3] = '\0';
 
-        /* In real impl, would invoke rustc_ppc here */
+        char asm_file[512];
+        snprintf(asm_file, sizeof(asm_file), "%s/%s.s", ctx->output_dir, p);
+
+        char obj_file[512];
+        snprintf(obj_file, sizeof(obj_file), "%s/%s.o", ctx->output_dir, p);
+
+        printf(";   %s -> %s\n", src, obj_file);
+
+        /* Compile Rust to assembly */
         char cmd[1024];
         snprintf(cmd, sizeof(cmd),
-                "./rustc_ppc %s -o %s.s "
+                "./rustc_ppc %s -o %s "
                 "-C target-cpu=%s "
                 "-C opt-level=%s "
                 "%s %s",
                 src,
-                crate->name,
+                asm_file,
                 ctx->config.cpu,
                 ctx->config.opt_level,
                 ctx->config.altivec ? "-C target-feature=+altivec" : "",
                 ctx->config.debug_info ? "-g" : "");
 
         printf(";   $ %s\n", cmd);
+        int rc = system(cmd);
+        if (rc != 0) {
+            fprintf(stderr, "Error: rustc_ppc failed for %s (exit %d)\n", src, rc);
+            return;
+        }
 
         /* Assemble */
-        snprintf(cmd, sizeof(cmd),
-                "as -o %s/%s.o %s.s",
-                ctx->output_dir, crate->name, crate->name);
+        snprintf(cmd, sizeof(cmd), "as -o %s %s", obj_file, asm_file);
         printf(";   $ %s\n", cmd);
+        rc = system(cmd);
+        if (rc != 0) {
+            fprintf(stderr, "Error: assembler failed for %s (exit %d)\n", asm_file, rc);
+            return;
+        }
     }
 }
 
 void link_binary(BuildContext* ctx, Crate* crate) {
     printf("; Linking: %s\n", crate->name);
 
-    char cmd[2048];
+    char cmd[8192];
     int len = 0;
 
     len += snprintf(cmd + len, sizeof(cmd) - len,
             "%s -o %s/%s ",
-            ctx->config.linker[0] ? ctx->config.linker : "gcc",
+            ctx->config.linker[0] ? ctx->config.linker :
+            (ctx->config.cc[0] ? ctx->config.cc : "gcc"),
             ctx->output_dir,
             crate->name);
 
-    /* Add object files */
-    len += snprintf(cmd + len, sizeof(cmd) - len,
-            "%s/%s.o ", ctx->output_dir, crate->name);
+    /* Add all object files from compiled sources */
+    for (int i = 0; i < crate->source_count; i++) {
+        char base[256];
+        strncpy(base, crate->source_files[i], sizeof(base) - 1);
+        base[sizeof(base) - 1] = '\0';
+        char* p = base;
+        if (p[0] == '.' && p[1] == '/') p += 2;
+        for (char* c = p; *c; c++) {
+            if (*c == '/' || *c == '.') *c = '_';
+        }
+        size_t blen = strlen(p);
+        if (blen > 3 && strcmp(p + blen - 3, "_rs") == 0)
+            p[blen - 3] = '\0';
+
+        len += snprintf(cmd + len, sizeof(cmd) - len,
+                "%s/%s.o ", ctx->output_dir, p);
+    }
 
     /* Add dependency libraries */
     for (int i = 0; i < crate->dep_count; i++) {
@@ -268,13 +318,18 @@ void link_binary(BuildContext* ctx, Crate* crate) {
     }
 
     printf(";   $ %s\n", cmd);
+    int rc = system(cmd);
+    if (rc != 0) {
+        fprintf(stderr, "Error: linker failed (exit %d)\n", rc);
+        return;
+    }
 }
 
 /* ============================================================
  * MAIN BUILD DRIVER
  * ============================================================ */
 
-void build_project(const char* project_dir) {
+void build_project(const char* project_dir, const char* cc) {
     BuildContext ctx;
     memset(&ctx, 0, sizeof(ctx));
 
@@ -284,6 +339,7 @@ void build_project(const char* project_dir) {
     strcpy(ctx.config.cpu, "7450");
     ctx.config.altivec = 1;
     ctx.config.debug_info = 0;
+    if (cc && cc[0]) strcpy(ctx.config.cc, cc);
     strcpy(ctx.output_dir, "target/powerpc-apple-darwin8/release");
 
     /* Find Cargo.toml */
@@ -364,13 +420,13 @@ void emit_tiger_toolchain() {
  * MAKEFILE GENERATION
  * ============================================================ */
 
-void generate_makefile(const char* project_name) {
+void generate_makefile(const char* project_name, const char* cc) {
     printf("# Makefile for %s (Tiger/Leopard PowerPC)\n\n", project_name);
 
     printf("# Toolchain\n");
     printf("RUSTC = ./rustc_ppc\n");
     printf("AS = as\n");
-    printf("CC = gcc\n");
+    printf("CC = %s\n", cc && cc[0] ? cc : "gcc");
     printf("AR = ar\n\n");
 
     printf("# Target configuration\n");
@@ -417,31 +473,45 @@ void generate_makefile(const char* project_name) {
  * MAIN
  * ============================================================ */
 
+/* Parse --cc <compiler> from argv, return the value or NULL */
+const char* parse_cc_flag(int argc, char** argv) {
+    for (int i = 1; i < argc - 1; i++) {
+        if (strcmp(argv[i], "--cc") == 0) {
+            return argv[i + 1];
+        }
+    }
+    return NULL;
+}
+
 int main(int argc, char** argv) {
     if (argc < 2) {
         printf("Rust Build System for Tiger/Leopard PowerPC\n\n");
         printf("Usage:\n");
-        printf("  %s build [path]     Build project\n", argv[0]);
-        printf("  %s toolchain        Show toolchain info\n", argv[0]);
-        printf("  %s makefile [name]  Generate Makefile\n", argv[0]);
-        printf("  %s --demo           Run demonstration\n", argv[0]);
+        printf("  %s build [path] [--cc <compiler>]  Build project\n", argv[0]);
+        printf("  %s toolchain                       Show toolchain info\n", argv[0]);
+        printf("  %s makefile [name] [--cc <compiler>] Generate Makefile\n", argv[0]);
+        printf("  %s --demo                          Run demonstration\n", argv[0]);
+        printf("\nOptions:\n");
+        printf("  --cc <compiler>  C compiler to use (default: gcc)\n");
         return 0;
     }
 
+    const char* cc = parse_cc_flag(argc, argv);
+
     if (strcmp(argv[1], "build") == 0) {
-        build_project(argc > 2 ? argv[2] : ".");
+        build_project(argc > 2 && argv[2][0] != '-' ? argv[2] : ".", cc);
     }
     else if (strcmp(argv[1], "toolchain") == 0) {
         emit_tiger_toolchain();
     }
     else if (strcmp(argv[1], "makefile") == 0) {
-        generate_makefile(argc > 2 ? argv[2] : "myproject");
+        generate_makefile(argc > 2 && argv[2][0] != '-' ? argv[2] : "myproject", cc);
     }
     else if (strcmp(argv[1], "--demo") == 0) {
         printf("; === Build System Demo ===\n\n");
         emit_tiger_toolchain();
         printf("\n");
-        generate_makefile("firefox");
+        generate_makefile("firefox", cc);
     }
 
     return 0;
