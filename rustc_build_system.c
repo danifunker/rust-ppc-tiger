@@ -116,9 +116,12 @@ int parse_cargo_toml(const char* path, Crate* crate) {
  * SOURCE FILE DISCOVERY
  * ============================================================ */
 
-void find_rust_files(const char* dir, Crate* crate) {
+void find_rust_files_recursive(const char* dir, const char* base_dir, Crate* crate) {
     DIR* d = opendir(dir);
     if (!d) return;
+
+    /* Calculate the relative prefix (skip base_dir + '/') */
+    size_t base_len = strlen(base_dir);
 
     struct dirent* entry;
     while ((entry = readdir(d)) != NULL) {
@@ -131,17 +134,26 @@ void find_rust_files(const char* dir, Crate* crate) {
         if (stat(path, &st) != 0) continue;
 
         if (S_ISDIR(st.st_mode)) {
-            find_rust_files(path, crate);
+            find_rust_files_recursive(path, base_dir, crate);
         } else if (S_ISREG(st.st_mode)) {
             size_t len = strlen(entry->d_name);
             if (len > 3 && strcmp(entry->d_name + len - 3, ".rs") == 0) {
-                crate->source_files[crate->source_count] = strdup(path);
+                /* Store path relative to base_dir (e.g. "src/main.rs") */
+                const char* rel = path;
+                if (strncmp(path, base_dir, base_len) == 0 && path[base_len] == '/') {
+                    rel = path + base_len + 1;
+                }
+                crate->source_files[crate->source_count] = strdup(rel);
                 crate->source_count++;
             }
         }
     }
 
     closedir(d);
+}
+
+void find_rust_files(const char* dir, const char* base_dir, Crate* crate) {
+    find_rust_files_recursive(dir, base_dir, crate);
 }
 
 /* ============================================================
@@ -380,7 +392,7 @@ void build_project(const char* project_dir, const char* cc, int verbose) {
     /* Find source files */
     char src_dir[512];
     snprintf(src_dir, sizeof(src_dir), "%s/src", project_dir);
-    find_rust_files(src_dir, main_crate);
+    find_rust_files(src_dir, project_dir, main_crate);
 
     printf("; =====================================================\n");
     printf("; Rust Build for Tiger/Leopard PowerPC\n");
