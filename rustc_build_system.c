@@ -44,6 +44,7 @@ typedef struct {
     int crate_count;
     BuildConfig config;
     char output_dir[256];
+    int verbose;
 } BuildContext;
 
 /* ============================================================
@@ -208,6 +209,9 @@ void compile_crate(BuildContext* ctx, Crate* crate) {
     snprintf(mkdir_cmd, sizeof(mkdir_cmd), "mkdir -p %s", ctx->output_dir);
     system(mkdir_cmd);
 
+    int compiled = 0;
+    int failed = 0;
+
     for (int i = 0; i < crate->source_count; i++) {
         char* src = crate->source_files[i];
 
@@ -234,7 +238,9 @@ void compile_crate(BuildContext* ctx, Crate* crate) {
         char obj_file[512];
         snprintf(obj_file, sizeof(obj_file), "%s/%s.o", ctx->output_dir, p);
 
-        printf(";   %s -> %s\n", src, obj_file);
+        if (ctx->verbose) {
+            printf(";   %s -> %s\n", src, obj_file);
+        }
 
         /* Compile Rust to assembly */
         char cmd[1024];
@@ -250,22 +256,36 @@ void compile_crate(BuildContext* ctx, Crate* crate) {
                 ctx->config.altivec ? "-C target-feature=+altivec" : "",
                 ctx->config.debug_info ? "-g" : "");
 
-        printf(";   $ %s\n", cmd);
+        if (ctx->verbose) {
+            printf(";   $ %s\n", cmd);
+        }
         int rc = system(cmd);
         if (rc != 0) {
             fprintf(stderr, "Error: rustc_ppc failed for %s (exit %d)\n", src, rc);
-            return;
+            failed++;
+            continue;
         }
 
         /* Assemble */
         snprintf(cmd, sizeof(cmd), "as -o %s %s", obj_file, asm_file);
-        printf(";   $ %s\n", cmd);
+        if (ctx->verbose) {
+            printf(";   $ %s\n", cmd);
+        }
         rc = system(cmd);
         if (rc != 0) {
             fprintf(stderr, "Error: assembler failed for %s (exit %d)\n", asm_file, rc);
-            return;
+            failed++;
+            continue;
         }
+
+        compiled++;
     }
+
+    printf(";   %d/%d files compiled", compiled, crate->source_count);
+    if (failed > 0) {
+        printf(", %d failed", failed);
+    }
+    printf("\n");
 }
 
 void link_binary(BuildContext* ctx, Crate* crate) {
@@ -317,7 +337,9 @@ void link_binary(BuildContext* ctx, Crate* crate) {
                 "-framework Accelerate ");
     }
 
-    printf(";   $ %s\n", cmd);
+    if (ctx->verbose) {
+        printf(";   $ %s\n", cmd);
+    }
     int rc = system(cmd);
     if (rc != 0) {
         fprintf(stderr, "Error: linker failed (exit %d)\n", rc);
@@ -329,9 +351,10 @@ void link_binary(BuildContext* ctx, Crate* crate) {
  * MAIN BUILD DRIVER
  * ============================================================ */
 
-void build_project(const char* project_dir, const char* cc) {
+void build_project(const char* project_dir, const char* cc, int verbose) {
     BuildContext ctx;
     memset(&ctx, 0, sizeof(ctx));
+    ctx.verbose = verbose;
 
     /* Default config for Tiger on G4 */
     strcpy(ctx.config.target, "powerpc-apple-darwin8");
@@ -483,6 +506,16 @@ const char* parse_cc_flag(int argc, char** argv) {
     return NULL;
 }
 
+/* Check if -v or --verbose is in argv */
+int parse_verbose_flag(int argc, char** argv) {
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "-v") == 0 || strcmp(argv[i], "--verbose") == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 int main(int argc, char** argv) {
     if (argc < 2) {
         printf("Rust Build System for Tiger/Leopard PowerPC\n\n");
@@ -493,13 +526,15 @@ int main(int argc, char** argv) {
         printf("  %s --demo                          Run demonstration\n", argv[0]);
         printf("\nOptions:\n");
         printf("  --cc <compiler>  C compiler to use (default: gcc)\n");
+        printf("  -v, --verbose    Show full compilation commands\n");
         return 0;
     }
 
     const char* cc = parse_cc_flag(argc, argv);
+    int verbose = parse_verbose_flag(argc, argv);
 
     if (strcmp(argv[1], "build") == 0) {
-        build_project(argc > 2 && argv[2][0] != '-' ? argv[2] : ".", cc);
+        build_project(argc > 2 && argv[2][0] != '-' ? argv[2] : ".", cc, verbose);
     }
     else if (strcmp(argv[1], "toolchain") == 0) {
         emit_tiger_toolchain();
