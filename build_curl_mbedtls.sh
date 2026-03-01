@@ -87,6 +87,14 @@ echo "Installing curl..."
 sudo make -C lib install
 sudo make -C src install
 
+# Copy static lib (not installed by make install)
+echo "Installing libcurl.a..."
+sudo cp lib/.libs/libcurl.a /usr/local/lib/
+
+# Copy mbedTLS libs (not installed by default)
+echo "Installing mbedTLS static libs..."
+sudo cp $MBEDTLS_DIR/library/libmbed*.a /usr/local/lib/
+
 # Install CA bundle (Tiger has none)
 echo "Installing CA certificate bundle..."
 sudo mkdir -p /usr/local/share/curl

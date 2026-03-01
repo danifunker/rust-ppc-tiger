@@ -75,7 +75,8 @@ $GMAKE configure
     CFLAGS="-O2 -mcpu=7450 -std=c99" \
     LDFLAGS="-L/usr/local/lib -L/usr/lib" \
     CPPFLAGS="-I/usr/local/include" \
-    PKG_CONFIG_PATH=/usr/local/lib/pkgconfig
+    PKG_CONFIG_PATH=/usr/local/lib/pkgconfig \
+    ac_cv_lib_curl_curl_global_init=yes
 
 # Create arc4random compat shim (not available on Tiger)
 echo "Creating arc4random compatibility shim..."
@@ -95,12 +96,14 @@ MAKE_FLAGS=(
     LDFLAGS="-L/usr/local/lib -L/usr/lib"
     NO_FUZZER=1
     NO_REGEX=1
+    BLK_SHA1=1
     USE_CURL_FOR_IMAP_SEND=YesPlease
     FSMONITOR_DAEMON_BACKEND=
     FSMONITOR_OS_SETTINGS=
     NEEDS_LIBICONV=YesPlease
+    IMAP_SEND_LDFLAGS="-L/usr/local/lib -lcurl -lmbedtls -lmbedx509 -lmbedcrypto -lz"
     COMPAT_OBJS="compat/arc4random.o compat/fopen.o compat/memmem.o compat/qsort_s.o compat/precompose_utf8.o compat/stub/procinfo.o"
-    EXTLIBS="compat/arc4random.o compat/fopen.o compat/memmem.o compat/qsort_s.o compat/precompose_utf8.o compat/stub/procinfo.o compat/regex/regex.o /opt/local/lib/libz.a -liconv"
+    EXTLIBS="compat/arc4random.o compat/fopen.o compat/memmem.o compat/qsort_s.o compat/precompose_utf8.o compat/stub/procinfo.o compat/regex/regex.o /usr/local/lib/libcurl.a /usr/local/lib/libmbedtls.a /usr/local/lib/libmbedx509.a /usr/local/lib/libmbedcrypto.a /opt/local/lib/libz.a -liconv"
 )
 
 if [ -n "$CURL_CFG" ]; then
@@ -112,6 +115,9 @@ $GMAKE -j4 "${MAKE_FLAGS[@]}"
 
 echo "Installing Git..."
 sudo $GMAKE install "${MAKE_FLAGS[@]}"
+
+# Configure SSL CA bundle for HTTPS
+$PREFIX/bin/git config --global http.sslCAInfo /usr/local/share/curl/cacert.pem
 
 echo ""
 echo "=== Git $GIT_VERSION installed! ==="
