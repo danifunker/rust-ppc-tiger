@@ -10,15 +10,20 @@ PREFIX="/usr/local"
 
 echo "=== Building rsync $RSYNC_VERSION for Tiger ==="
 
-# Check for wget (our custom one with TLS 1.2)
-if [ ! -x /usr/local/bin/wget ] && [ ! -x ./wget ]; then
-    echo "ERROR: wget with TLS support not found"
-    echo "Please build wget_tiger first"
+# Check for download tool
+DOWNLOAD=""
+if [ -x /usr/local/bin/wget ]; then
+    DOWNLOAD="/usr/local/bin/wget -O"
+elif [ -x /opt/local/bin/curl ]; then
+    DOWNLOAD="/opt/local/bin/curl -L -o"
+elif [ -x /usr/local/bin/curl ]; then
+    DOWNLOAD="/usr/local/bin/curl -L -o"
+else
+    echo "ERROR: No download tool with TLS support found"
+    echo "Please build wget_tiger or install MacPorts curl first"
     exit 1
 fi
-
-WGET="/usr/local/bin/wget"
-[ -x ./wget ] && WGET="./wget"
+echo "Using: $DOWNLOAD"
 
 # Create build directory
 mkdir -p ~/rsync_build
@@ -32,7 +37,7 @@ echo "=== Step 1: Building xxHash $XXHASH_VERSION ==="
 
 if [ ! -f "xxHash-$XXHASH_VERSION.tar.gz" ]; then
     echo "Downloading xxHash..."
-    $WGET -O xxHash-$XXHASH_VERSION.tar.gz \
+    $DOWNLOAD xxHash-$XXHASH_VERSION.tar.gz \
         "https://github.com/Cyan4973/xxHash/archive/refs/tags/v$XXHASH_VERSION.tar.gz"
 fi
 
@@ -44,8 +49,8 @@ fi
 cd xxHash-$XXHASH_VERSION
 
 if [ ! -f "$PREFIX/lib/libxxhash.a" ]; then
-    echo "Building xxHash..."
-    make CC="gcc -arch ppc" CFLAGS="-O2 -mcpu=7450" lib
+    echo "Building xxHash (static library only)..."
+    make CC="gcc -arch ppc" CFLAGS="-O2 -mcpu=7450" libxxhash.a
 
     echo "Installing xxHash..."
     sudo mkdir -p $PREFIX/include $PREFIX/lib
@@ -65,7 +70,7 @@ echo "=== Step 2: Building rsync $RSYNC_VERSION ==="
 
 if [ ! -f "rsync-$RSYNC_VERSION.tar.gz" ]; then
     echo "Downloading rsync..."
-    $WGET -O rsync-$RSYNC_VERSION.tar.gz \
+    $DOWNLOAD rsync-$RSYNC_VERSION.tar.gz \
         "https://download.samba.org/pub/rsync/src/rsync-$RSYNC_VERSION.tar.gz"
 fi
 
@@ -81,6 +86,8 @@ echo "Configuring rsync..."
     --prefix=$PREFIX \
     --disable-md2man \
     --disable-openssl \
+    --disable-zstd \
+    --disable-lz4 \
     --with-included-zlib \
     --with-included-popt \
     CC="gcc -arch ppc" \
@@ -94,7 +101,7 @@ echo "Installing rsync..."
 sudo make install
 
 echo ""
-echo "=== rsync $RSYNC_VERSION installed successfully! ===\"
+echo "=== rsync $RSYNC_VERSION installed successfully! ==="
 echo ""
 echo "New rsync installed to $PREFIX/bin/rsync"
 echo ""

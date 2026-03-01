@@ -4,7 +4,7 @@
 
 set -e
 
-LIBRESSL_VERSION="3.8.2"
+LIBRESSL_VERSION="3.3.6"
 OPENSSH_VERSION="9.6p1"
 PREFIX="/usr/local"
 
@@ -54,8 +54,9 @@ if [ ! -f "$PREFIX/lib/libssl.a" ]; then
         --prefix=$PREFIX \
         --disable-shared \
         --enable-static \
+        --host=powerpc-apple-darwin8 \
         CC="gcc -arch ppc" \
-        CFLAGS="-O2 -mcpu=7450"
+        CFLAGS="-arch ppc -O2 -mcpu=7450"
 
     echo "Building LibreSSL..."
     make -j2
@@ -104,24 +105,37 @@ if ! dscl . -read /Users/sshd > /dev/null 2>&1; then
     sudo dscl . -create /Users/sshd NFSHomeDirectory /var/empty
 fi
 
+# Rename system openssl to prevent version conflict during build
+if [ -f /usr/bin/openssl ] && [ ! -f /usr/bin/openssl.tiger ]; then
+    echo "Renaming system /usr/bin/openssl to prevent version conflict..."
+    sudo mv /usr/bin/openssl /usr/bin/openssl.tiger
+fi
+
 echo "Configuring OpenSSH..."
 ./configure \
-    --prefix=$PREFIX \
+    --prefix=/usr/local \
     --sysconfdir=/etc/ssh \
-    --with-ssl-dir=$PREFIX \
+    --with-ssl-dir=/usr/local \
     --with-privsep-path=/var/empty \
     --with-privsep-user=sshd \
     --with-zlib \
     --without-openssl-header-check \
     CC="gcc -arch ppc" \
-    CFLAGS="-O2 -mcpu=7450 -I$PREFIX/include" \
-    LDFLAGS="-L$PREFIX/lib"
+    CPPFLAGS="-I/usr/local/include" \
+    CFLAGS="-O2 -mcpu=7450 -I/usr/local/include" \
+    LDFLAGS="-L/usr/local/lib -Wl,-search_paths_first"
 
 echo "Building OpenSSH..."
 make -j2
 
 echo "Installing OpenSSH..."
 sudo make install
+
+# Restore system openssl if we renamed it
+if [ -f /usr/bin/openssl.tiger ] && [ ! -f /usr/bin/openssl ]; then
+    echo "Restoring system /usr/bin/openssl..."
+    sudo mv /usr/bin/openssl.tiger /usr/bin/openssl
+fi
 
 # ============================================
 # Step 3: Setup
